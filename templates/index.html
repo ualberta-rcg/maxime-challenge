@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slurm Job Monitor</title>
+<style>
+:root {
+  --primary: #2563eb;
+  --primary-dark: #1e40af;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --text: #1e293b;
+  --text-sec: #64748b;
+  --border: #e2e8f0;
+  --ring-size: 220;
+  --ring-r: 95;
+  --ring-c: 596.9;          /* 2 * PI * 95 */
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+/* ── Header ─────────────────────────────────── */
+.header{
+  width:100%;
+  background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#2563eb 100%);
+  color:#fff;
+  padding:1.25rem 2rem;
+  text-align:center;
+}
+.header h1{font-size:1.35rem;font-weight:600;letter-spacing:.02em}
+.header p{font-size:.8rem;opacity:.7;margin-top:.25rem}
+
+/* ── Container ──────────────────────────────── */
+.container{max-width:580px;width:100%;padding:1.5rem 1rem 3rem}
+
+/* ── Cards ──────────────────────────────────── */
+.card{
+  background:var(--card);
+  border-radius:14px;
+  box-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(0,0,0,.04);
+  padding:1.5rem;
+  margin-bottom:1rem;
+}
+
+/* ── Status badge ───────────────────────────── */
+.badge{
+  display:inline-block;
+  font-size:.75rem;font-weight:600;
+  padding:.25rem .65rem;
+  border-radius:999px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.badge-running{background:#dbeafe;color:#1d4ed8}
+.badge-pending{background:#fef3c7;color:#92400e}
+.badge-completed{background:#d1fae5;color:#065f46}
+.badge-failed{background:#fee2e2;color:#991b1b}
+.badge-unknown{background:#f1f5f9;color:#475569}
+
+/* ── Info grid ──────────────────────────────── */
+.info-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:.6rem 1.5rem;
+  margin-top:1rem;
+}
+.info-item label{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-sec)}
+.info-item span{display:block;font-size:.95rem;font-weight:500;margin-top:.1rem}
+
+/* ── Ring timer ─────────────────────────────── */
+.timer-section{display:flex;flex-direction:column;align-items:center;padding:1.5rem 0}
+.ring-wrap{position:relative;width:var(--ring-size);height:var(--ring-size)}
+.ring-wrap svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring-bg{fill:none;stroke:var(--border);stroke-width:10}
+.ring-fg{
+  fill:none;
+  stroke:var(--primary);
+  stroke-width:10;
+  stroke-linecap:round;
+  stroke-dasharray:var(--ring-c);
+  stroke-dashoffset:0;
+  transition:stroke .6s,stroke-dashoffset .4s ease;
+}
+.ring-text{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+}
+.ring-time{font-size:2rem;font-weight:700;font-variant-numeric:tabular-nums}
+.ring-label{font-size:.75rem;color:var(--text-sec);margin-top:.15rem}
+
+/* ── Progress bar ───────────────────────────── */
+.progress-wrap{margin-top:1.2rem;width:100%;max-width:380px}
+.progress-bar{
+  height:8px;
+  border-radius:99px;
+  background:var(--border);
+  overflow:hidden;
+}
+.progress-fill{
+  height:100%;
+  border-radius:99px;
+  background:var(--primary);
+  transition:width .5s ease,background .5s;
+  width:0%;
+}
+.progress-labels{
+  display:flex;justify-content:space-between;
+  font-size:.72rem;color:var(--text-sec);margin-top:.35rem;
+  font-variant-numeric:tabular-nums;
+}
+
+/* ── Extend section ─────────────────────────── */
+.extend-section{text-align:center}
+.extend-btn{
+  display:inline-flex;align-items:center;gap:.5rem;
+  padding:.75rem 2rem;
+  border:none;border-radius:10px;
+  font-size:.95rem;font-weight:600;
+  cursor:pointer;
+  transition:all .25s;
+  color:#fff;
+  background:linear-gradient(135deg,var(--primary),var(--primary-dark));
+  box-shadow:0 2px 8px rgba(37,99,235,.35);
+}
+.extend-btn:hover:not(:disabled){
+  transform:translateY(-1px);
+  box-shadow:0 4px 14px rgba(37,99,235,.45);
+}
+.extend-btn:active:not(:disabled){transform:translateY(0)}
+.extend-btn:disabled{
+  background:#cbd5e1;
+  color:#94a3b8;
+  cursor:not-allowed;
+  box-shadow:none;
+}
+.extend-btn .icon{font-size:1.15rem}
+.extend-hint{font-size:.78rem;color:var(--text-sec);margin-top:.6rem}
+.extend-result{
+  margin-top:.7rem;
+  font-size:.85rem;font-weight:500;
+  padding:.5rem 1rem;
+  border-radius:8px;
+  display:none;
+}
+.extend-result.ok{display:block;background:#d1fae5;color:#065f46}
+.extend-result.err{display:block;background:#fee2e2;color:#991b1b}
+
+/* ── Error / loading states ─────────────────── */
+.error-banner{
+  background:#fee2e2;color:#991b1b;
+  border-radius:10px;padding:1rem 1.25rem;
+  text-align:center;font-weight:500;
+  margin-bottom:1rem;
+}
+.loading{text-align:center;padding:3rem 0;color:var(--text-sec)}
+.loading .spinner{
+  width:36px;height:36px;
+  border:3px solid var(--border);
+  border-top-color:var(--primary);
+  border-radius:50%;
+  animation:spin .7s linear infinite;
+  margin:0 auto .8rem;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Footer ─────────────────────────────────── */
+.footer{
+  text-align:center;
+  font-size:.72rem;
+  color:var(--text-sec);
+  margin-top:.5rem;
+}
+.footer a{color:var(--primary);text-decoration:none}
+
+/* ── Toast notification ─────────────────────── */
+.toast{
+  position:fixed;top:1rem;right:1rem;
+  background:#1e293b;color:#fff;
+  padding:.75rem 1.25rem;
+  border-radius:10px;
+  font-size:.85rem;font-weight:500;
+  box-shadow:0 4px 16px rgba(0,0,0,.2);
+  transform:translateX(120%);
+  transition:transform .35s ease;
+  z-index:100;
+}
+.toast.show{transform:translateX(0)}
+
+/* ── Responsive ─────────────────────────────── */
+@media(max-width:480px){
+  .info-grid{grid-template-columns:1fr}
+  .ring-time{font-size:1.5rem}
+  :root{--ring-size:180px;--ring-r:78;--ring-c:490.1}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Slurm Job Monitor</h1>
+  <p>Alliance Canada &middot; HPC Job Time Tracker</p>
+</div>
+
+<div class="container" id="app">
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    Connecting to Slurm&hellip;
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  /* ── resolve relative URLs behind any reverse proxy ── */
+  const BASE = window.location.href.replace(/[^/]*$/, '');
+  function apiUrl(path){ return new URL(path, BASE).href; }
+
+  const JOB_ID = {{ job_id | tojson }};
+  const EXTEND_MIN = {{ extend_minutes }};
+  const POLL_MS = 15000;
+
+  let remaining = null;   // seconds, ticks down locally
+  let totalLimit = null;
+  let extendEnabled = false;
+  let wasFarFromDeadline = true;   // to trigger notification once
+  let polling = null;
+  let ticking = null;
+  let extending = false;
+
+  /* ── helpers ────────────────────────────────── */
+  function fmt(s){
+    if(s==null) return '--:--:--';
+    const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600),
+          m=Math.floor((s%3600)/60), sec=s%60;
+    const hms = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    return d>0 ? `${d}d ${hms}` : hms;
+  }
+
+  function badgeClass(state){
+    if(!state) return 'badge-unknown';
+    const s=state.toUpperCase();
+    if(s==='RUNNING') return 'badge-running';
+    if(s==='PENDING'||s==='CONFIGURING') return 'badge-pending';
+    if(s==='COMPLETED'||s==='COMPLETING') return 'badge-completed';
+    return 'badge-failed';
+  }
+
+  function ringColor(secs){
+    if(secs==null) return 'var(--primary)';
+    if(secs<=900) return 'var(--danger)';
+    if(secs<=3600) return 'var(--warning)';
+    return 'var(--primary)';
+  }
+
+  function showToast(msg, ms){
+    const t=document.getElementById('toast');
+    t.textContent=msg;
+    t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'), ms||4000);
+  }
+
+  /* ── build the UI skeleton once we have first data ── */
+  function buildUI(d){
+    const c=document.getElementById('app');
+    c.innerHTML=`
+      <div class="card" id="info-card">
+        <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+          <span style="font-size:1.1rem;font-weight:600">Job <span id="jid">${d.job_id}</span></span>
+          <span class="badge ${badgeClass(d.state)}" id="jstate">${d.state}</span>
+        </div>
+        <div class="info-grid" id="info-grid">
+          <div class="info-item"><label>Name</label><span id="jname">${d.job_name||'N/A'}</span></div>
+          <div class="info-item"><label>Partition</label><span id="jpart">${d.partition||'N/A'}</span></div>
+          <div class="info-item"><label>Node(s)</label><span id="jnodes">${d.nodes||'N/A'}</span></div>
+          <div class="info-item"><label>CPUs</label><span id="jcpus">${d.num_cpus||'N/A'}</span></div>
+          ${d.tres&&d.tres!=='N/A'?`<div class="info-item" style="grid-column:1/-1"><label>Resources</label><span id="jtres">${d.tres}</span></div>`:''}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="timer-section">
+          <div class="ring-wrap">
+            <svg viewBox="0 0 220 220">
+              <circle class="ring-bg" cx="110" cy="110" r="95"/>
+              <circle class="ring-fg" id="ring" cx="110" cy="110" r="95"/>
+            </svg>
+            <div class="ring-text">
+              <div class="ring-time" id="countdown">${fmt(d.remaining_secs)}</div>
+              <div class="ring-label">remaining</div>
+            </div>
+          </div>
+          <div class="progress-wrap">
+            <div class="progress-bar"><div class="progress-fill" id="pbar"></div></div>
+            <div class="progress-labels">
+              <span id="pelapsed">${d.run_time||'--'}</span>
+              <span id="plimit">${d.time_limit||'--'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card extend-section">
+        <button class="extend-btn" id="extend-btn" disabled>
+          <span class="icon">&#x23F1;</span>
+          Extend Job by ${EXTEND_MIN} Minutes
+        </button>
+        <div class="extend-hint" id="extend-hint">Available when less than 1 hour remains</div>
+        <div class="extend-result" id="extend-result"></div>
+      </div>
+
+      <div class="footer">
+        Updated <span id="updated">just now</span> &middot;
+        polling every ${POLL_MS/1000}s
+      </div>`;
+
+    document.getElementById('extend-btn').addEventListener('click', doExtend);
+  }
+
+  /* ── update UI with new data ────────────────── */
+  function applyData(d){
+    if(d.error){ showToast('Error: '+d.error, 5000); return; }
+
+    const state = document.getElementById('jstate');
+    if(state){
+      state.textContent = d.state;
+      state.className = 'badge '+badgeClass(d.state);
+    }
+    const el = id => document.getElementById(id);
+    if(el('jname')) el('jname').textContent = d.job_name||'N/A';
+    if(el('jpart')) el('jpart').textContent = d.partition||'N/A';
+    if(el('jnodes')) el('jnodes').textContent = d.nodes||'N/A';
+    if(el('jcpus')) el('jcpus').textContent = d.num_cpus||'N/A';
+    if(el('pelapsed')) el('pelapsed').textContent = d.run_time||'--';
+    if(el('plimit')) el('plimit').textContent = d.time_limit||'--';
+
+    remaining = d.remaining_secs!=null ? Math.max(0, Math.round(d.remaining_secs)) : null;
+    totalLimit = d.time_limit_secs;
+    extendEnabled = !!d.extend_enabled;
+    updateRing();
+    updateButton();
+
+    if(el('updated')) el('updated').textContent = new Date().toLocaleTimeString();
+
+    // one-time notification when threshold crossed
+    if(extendEnabled && wasFarFromDeadline){
+      wasFarFromDeadline = false;
+      showToast('Less than 1 hour left — you can now extend the job!', 6000);
+    }
+    if(!extendEnabled) wasFarFromDeadline = true;
+  }
+
+  function updateRing(){
+    const ring = document.getElementById('ring');
+    const cd   = document.getElementById('countdown');
+    if(!ring||!cd) return;
+
+    cd.textContent = fmt(remaining);
+
+    const C = 2*Math.PI*95;  // circumference
+    let pct = 0;
+    if(totalLimit && remaining!=null) pct = remaining/totalLimit;
+    ring.style.strokeDasharray  = C;
+    ring.style.strokeDashoffset = C*(1-pct);
+    ring.style.stroke = ringColor(remaining);
+
+    // progress bar (elapsed fraction)
+    const bar = document.getElementById('pbar');
+    if(bar && totalLimit){
+      const elapsed = totalLimit - (remaining||0);
+      const frac = Math.min(1, elapsed/totalLimit)*100;
+      bar.style.width = frac+'%';
+      bar.style.background = ringColor(remaining);
+    }
+  }
+
+  function updateButton(){
+    const btn  = document.getElementById('extend-btn');
+    const hint = document.getElementById('extend-hint');
+    if(!btn) return;
+    btn.disabled = !extendEnabled || extending;
+    if(extendEnabled){
+      hint.textContent = extending ? 'Requesting extension\u2026' : 'Click to add time to your job';
+    } else if(remaining!=null){
+      const mins = Math.ceil((remaining-3600)/60);
+      hint.textContent = mins>0
+        ? `Available in ~${mins} minute${mins!==1?'s':''} (when < 1 h remains)`
+        : 'Available when less than 1 hour remains';
+    }
+  }
+
+  /* ── tick countdown every second between polls ── */
+  function tick(){
+    if(remaining!=null && remaining>0){
+      remaining--;
+      updateRing();
+      // re-check threshold
+      if(remaining<3600 && !extendEnabled){
+        extendEnabled=true;
+        updateButton();
+        if(wasFarFromDeadline){
+          wasFarFromDeadline=false;
+          showToast('Less than 1 hour left — you can now extend the job!', 6000);
+        }
+      }
+    }
+  }
+
+  /* ── fetch status from server ───────────────── */
+  let firstLoad = true;
+  async function fetchStatus(){
+    try{
+      const qs = JOB_ID ? '?job_id='+JOB_ID : '';
+      const r = await fetch(apiUrl('api/status'+qs));
+      const d = await r.json();
+      if(firstLoad){
+        if(d.error){
+          document.getElementById('app').innerHTML =
+            '<div class="error-banner">'+d.error+'</div>';
+          return;
+        }
+        buildUI(d);
+        firstLoad=false;
+      }
+      applyData(d);
+    }catch(e){
+      showToast('Network error — retrying\u2026', 3000);
+    }
+  }
+
+  /* ── extend handler ─────────────────────────── */
+  async function doExtend(){
+    if(extending) return;
+    extending = true;
+    updateButton();
+    const res = document.getElementById('extend-result');
+    res.className = 'extend-result';
+    res.style.display = 'none';
+    try{
+      const qs = JOB_ID ? '?job_id='+JOB_ID : '';
+      const r  = await fetch(apiUrl('api/extend'+qs), {method:'POST'});
+      const d  = await r.json();
+      res.style.display = 'block';
+      if(d.success){
+        res.className = 'extend-result ok';
+        res.textContent = d.message;
+        showToast('Job extended!', 4000);
+        setTimeout(fetchStatus, 1500);
+      }else{
+        res.className = 'extend-result err';
+        res.textContent = d.message;
+      }
+    }catch(e){
+      res.style.display = 'block';
+      res.className = 'extend-result err';
+      res.textContent = 'Network error';
+    }finally{
+      extending = false;
+      updateButton();
+    }
+  }
+
+  /* ── start ──────────────────────────────────── */
+  fetchStatus();
+  polling  = setInterval(fetchStatus, POLL_MS);
+  ticking  = setInterval(tick, 1000);
+})();
+</script>
+</body>
+</html>
