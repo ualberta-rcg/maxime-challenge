@@ -1,0 +1,41 @@
+<%-
+  emailaddr = File.read(File.expand_path('~/ondemand/oidc_email.txt')).strip rescue ''
+-%>
+
+batch_connect:
+  template: "basic"
+
+script:
+  cluster: "<%= cluster %>"
+  <% if defined?(bc_email_on_started) && bc_email_on_started == "1" && emailaddr != "" %>
+  email: <%= emailaddr.inspect %>
+  <% end %>
+  native:
+    - "-N"
+    - "1"
+    - "-n"
+    - "<%= num_cores %>"
+    - "--time=<%= bc_num_hours %>:00:00"
+    <%- if defined?(gpu_checkbox) && gpu_checkbox == "1" && gpu_type != "none"
+          _gt = gpu_type.to_s
+          _gc = gpu_count.to_i
+          _gc = 1 if _gc < 1
+          if defined?(CustomGPUInfo) && CustomGPUInfo.respond_to?(:gpu_max_counts)
+            _mc = CustomGPUInfo.gpu_max_counts[_gt]
+            _mc = _mc.to_i if _mc
+            if _mc && _mc > 0
+              _gc = [_gc, _mc].min
+            end
+          end
+          effective_gpu_count = _gc
+        -%>
+    - "--gres=gpu:<%= gpu_type %>:<%= effective_gpu_count %>"
+    <%- end -%>
+    <%- if defined?(memtask_checkbox) && memtask_checkbox == "1" && memtask.present? && memtask != "0" -%>
+    - "--mem=<%= memtask %>G"
+    <%- end -%>
+    <%- if defined?(additional_environment) && additional_environment.present? -%>
+    # Additional environment setup will be handled in the job script
+    <%- end -%>
+    - "--partition=compute"
+

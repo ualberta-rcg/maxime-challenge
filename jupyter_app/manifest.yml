@@ -1,0 +1,13 @@
+---
+name: Jupyter Lab
+category: Interactive Apps
+subcategory: Development
+role: batch_connect
+description: |
+  Launch a [JupyterLab] server on the Eureka high-performance computing (HPC) cluster, powered by the [University of Alberta].
+
+  Jobs are scheduled with [SLURM], and you can request CPU or GPU resources for your Jupyter environment.
+
+  [JupyterLab]: https://jupyterlab.readthedocs.io/en/stable/
+  [University of Alberta]: https://www.ualberta.ca/
+  [SLURM]: https://slurm.schedmd.com/documentation.html
