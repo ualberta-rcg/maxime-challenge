@@ -1,0 +1,187 @@
+<%#
+  info.html.erb — Extend-session widget shown on the OOD session card.
+  OOD provides: id, cluster_id, job_id, created_at
+%>
+
+<div id="extend-widget-<%= job_id %>" class="mt-3">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <strong style="font-size:.9rem">
+      <i class="fas fa-clock"></i> Time Remaining
+    </strong>
+    <span id="ext-badge-<%= job_id %>" class="badge bg-primary"
+          style="font-size:.85rem; font-variant-numeric:tabular-nums">
+      --:--:--
+    </span>
+  </div>
+
+  <div class="progress mb-2" style="height:6px">
+    <div id="ext-bar-<%= job_id %>" class="progress-bar" role="progressbar"
+         style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center justify-content-between mb-1"
+       style="font-size:.78rem; color:#6c757d; font-variant-numeric:tabular-nums">
+    <span id="ext-elapsed-<%= job_id %>">--:--:--</span>
+    <span id="ext-limit-<%= job_id %>">--:--:--</span>
+  </div>
+
+  <button id="ext-btn-<%= job_id %>" class="btn btn-sm btn-outline-primary w-100 mt-2" disabled>
+    <i class="fas fa-hourglass-half"></i>
+    <span id="ext-btn-label-<%= job_id %>">Extend Session</span>
+  </button>
+
+  <div id="ext-hint-<%= job_id %>" class="text-muted text-center mt-1" style="font-size:.75rem">
+    Available when less than 1 hour remains
+  </div>
+
+  <div id="ext-result-<%= job_id %>" class="mt-2" style="display:none"></div>
+</div>
+
+<script>
+(function() {
+  var JOB_ID   = "<%= job_id %>";
+  var POLL_MS  = 30000;
+  var remaining = null;
+  var totalLimit = null;
+  var extendEnabled = false;
+  var extending = false;
+  var notified = false;
+
+  var badge   = document.getElementById("ext-badge-"   + JOB_ID);
+  var bar     = document.getElementById("ext-bar-"     + JOB_ID);
+  var elapsed = document.getElementById("ext-elapsed-" + JOB_ID);
+  var limit   = document.getElementById("ext-limit-"   + JOB_ID);
+  var btn     = document.getElementById("ext-btn-"     + JOB_ID);
+  var btnLbl  = document.getElementById("ext-btn-label-" + JOB_ID);
+  var hint    = document.getElementById("ext-hint-"    + JOB_ID);
+  var result  = document.getElementById("ext-result-"  + JOB_ID);
+
+  function fmt(s) {
+    if (s == null) return "--:--:--";
+    var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+        m = Math.floor((s % 3600) / 60), sec = s % 60;
+    var hms = String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0") + ":" + String(sec).padStart(2,"0");
+    return d > 0 ? d + "d " + hms : hms;
+  }
+
+  function badgeColor(s) {
+    if (s == null) return "bg-secondary";
+    if (s <= 900)  return "bg-danger";
+    if (s <= 3600) return "bg-warning text-dark";
+    return "bg-primary";
+  }
+
+  function barColor(s) {
+    if (s == null) return "bg-primary";
+    if (s <= 900)  return "bg-danger";
+    if (s <= 3600) return "bg-warning";
+    return "bg-primary";
+  }
+
+  function updateUI() {
+    badge.textContent = fmt(remaining);
+    badge.className = "badge " + badgeColor(remaining);
+
+    if (totalLimit && remaining != null) {
+      var elapsedSec = totalLimit - remaining;
+      var pct = Math.min(100, (elapsedSec / totalLimit) * 100);
+      bar.style.width = pct + "%";
+      bar.className = "progress-bar " + barColor(remaining);
+      elapsed.textContent = fmt(elapsedSec);
+      limit.textContent = fmt(totalLimit);
+    }
+
+    btn.disabled = !extendEnabled || extending;
+    if (extendEnabled) {
+      btn.className = "btn btn-sm btn-primary w-100 mt-2";
+      btnLbl.textContent = extending ? "Extending..." : "Extend Session (+60 min)";
+      hint.textContent = extending ? "Requesting extension..." : "Click to add 60 minutes to your job";
+    } else if (remaining != null) {
+      btn.className = "btn btn-sm btn-outline-primary w-100 mt-2";
+      btnLbl.textContent = "Extend Session (+60 min)";
+      var mins = Math.ceil((remaining - 3600) / 60);
+      hint.textContent = mins > 0
+        ? "Available in ~" + mins + " min (when < 1 hr remains)"
+        : "Available when less than 1 hour remains";
+    }
+  }
+
+  function applyData(data) {
+    if (data.error) return;
+    remaining    = data.remaining_secs != null ? Math.max(0, Math.round(data.remaining_secs)) : null;
+    totalLimit   = data.time_limit_secs;
+    extendEnabled = !!data.extend_enabled;
+    updateUI();
+  }
+
+  function csrfToken() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute("content") : "";
+  }
+
+  function fetchStatus() {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", "/pun/sys/dashboard/slurm/job_time?job_id=" + JOB_ID);
+    xhr.onload = function() {
+      if (xhr.status === 200) {
+        try { applyData(JSON.parse(xhr.responseText)); } catch(e) {}
+      }
+    };
+    xhr.send();
+  }
+
+  function tick() {
+    if (remaining != null && remaining > 0) {
+      remaining--;
+      if (remaining < 3600 && !extendEnabled) {
+        extendEnabled = true;
+      }
+      updateUI();
+    }
+  }
+
+  function doExtend() {
+    if (extending || !extendEnabled) return;
+    extending = true;
+    updateUI();
+    result.style.display = "none";
+
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", "/pun/sys/dashboard/slurm/extend_job");
+    xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+    xhr.setRequestHeader("X-CSRF-Token", csrfToken());
+    xhr.onload = function() {
+      extending = false;
+      var data;
+      try { data = JSON.parse(xhr.responseText); } catch(e) { data = {success:false, message:"Invalid response"}; }
+      result.style.display = "block";
+      if (data.success) {
+        result.className = "alert alert-success mt-2 py-1 px-2";
+        result.style.fontSize = ".8rem";
+        result.textContent = data.message;
+        setTimeout(fetchStatus, 1500);
+      } else {
+        result.className = "alert alert-danger mt-2 py-1 px-2";
+        result.style.fontSize = ".8rem";
+        result.textContent = data.message || "Extension failed";
+      }
+      updateUI();
+    };
+    xhr.onerror = function() {
+      extending = false;
+      result.style.display = "block";
+      result.className = "alert alert-danger mt-2 py-1 px-2";
+      result.style.fontSize = ".8rem";
+      result.textContent = "Network error";
+      updateUI();
+    };
+    xhr.send("job_id=" + JOB_ID);
+  }
+
+  btn.addEventListener("click", doExtend);
+  fetchStatus();
+  setInterval(fetchStatus, POLL_MS);
+  setInterval(tick, 1000);
+})();
+</script>

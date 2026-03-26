@@ -27,9 +27,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 SLURM_JOB_ID = os.environ.get("SLURM_JOB_ID")
-EXTEND_SCRIPT = os.environ.get("EXTEND_SCRIPT")
+EXTEND_SCRIPT = os.environ.get("EXTEND_SCRIPT", "/usr/local/sbin/extend_job.sh")
 EXTEND_MINUTES = int(os.environ.get("EXTEND_MINUTES", "60"))
 PORT = int(os.environ.get("MONITOR_PORT", "8090"))
+USE_SUDO = os.environ.get("EXTEND_USE_SUDO", "1") == "1"
 
 
 def _parse_duration(s):
@@ -136,14 +137,30 @@ def get_job_info(job_id):
         return {"error": str(exc)}
 
 
-def extend_job(job_id):
-    """Ask Slurm (or a custom script) to extend the job."""
+def _verify_ownership(job_id):
+    """Return True if the current user owns the given job."""
     try:
-        if EXTEND_SCRIPT:
-            r = _run([EXTEND_SCRIPT, str(job_id), str(EXTEND_MINUTES)], timeout=30)
-        else:
-            r = _run(["scontrol", "update",
-                       f"JobId={job_id}", f"TimeLimit=+{EXTEND_MINUTES}"], timeout=30)
+        r = _run(["squeue", "-j", str(job_id), "-h", "-o", "%u"])
+        owner = r.stdout.strip()
+        return owner == os.environ.get("USER", "")
+    except Exception:
+        return False
+
+
+def extend_job(job_id):
+    """Extend the job via the privileged wrapper script (requires sudo).
+
+    Regular users cannot scontrol-update TimeLimit, so this calls
+    sudo /usr/local/sbin/extend_job.sh which validates ownership
+    and runs the update as root.
+    """
+    if not _verify_ownership(job_id):
+        return {"success": False, "message": "You do not own this job"}
+
+    try:
+        cmd = ["sudo", EXTEND_SCRIPT, str(job_id), str(EXTEND_MINUTES)] if USE_SUDO \
+              else [EXTEND_SCRIPT, str(job_id), str(EXTEND_MINUTES)]
+        r = _run(cmd, timeout=30)
 
         if r.returncode == 0:
             return {"success": True,

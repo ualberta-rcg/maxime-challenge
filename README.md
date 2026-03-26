@@ -1,91 +1,127 @@
-# Slurm Job Monitor
+# Slurm Job Extend for Open OnDemand
 
-A lightweight web server that displays time remaining for a running Slurm job
-and lets users extend it when the deadline approaches. Designed to run behind
-**JupyterHub** or **Open OnDemand** reverse proxies on Alliance Canada clusters.
+Add an **Extend Session** button to OOD interactive app session cards (e.g. Jupyter).
+When a job has less than 1 hour of wall-time remaining, the user can click the button
+to add 60 minutes via `scontrol update`.
 
-## Features
+Built for **Open OnDemand 4.1** on **Alliance Canada** clusters (Eureka / PAICE).
 
-- **Live countdown** — queries Slurm every 15 seconds, smooth client-side tick in between.
-- **SVG ring + progress bar** — colour shifts from blue → amber → red as time runs out.
-- **Extend button** — greyed out until less than 1 hour remains, then calls
-  `scontrol update JobId=… TimeLimit=+60` (or a custom script) to add time.
-- **Proxy-friendly** — uses relative URLs so it works behind any path prefix.
-- **Zero JavaScript dependencies** — vanilla JS, no build step.
+---
 
-## Quick start
+## How it works
+
+```
+Browser (OOD session card)
+  │
+  │  GET /slurm/job_time?job_id=1234      (polls every 30s)
+  │  POST /slurm/extend_job               (on button click)
+  ▼
+OOD Dashboard (Rails, PUN — runs as user)
+  │
+  │  initializer: job_extend.rb
+  │  • validates job_id is numeric
+  │  • verifies the requesting user owns the job
+  │  • calls: sudo /usr/local/sbin/extend_job.sh <job_id> 60
+  ▼
+extend_job.sh (runs as root)
+  │  • re-validates ownership (SUDO_USER == job owner)
+  │  • enforces min/max bounds on extension minutes
+  │  • scontrol update JobId=<id> TimeLimit=+60
+  ▼
+Slurm
+```
+
+## Components
+
+| File | Deploy to | Purpose |
+|---|---|---|
+| `jupyter_app/info.html.erb` | `/var/www/ood/apps/sys/jupyter_app/` | Extend widget on the session card |
+| `dashboard_config/initializers/job_extend.rb` | `/etc/ood/config/apps/dashboard/initializers/` | API routes for job time + extend |
+| `extend_job.sh` | `/usr/local/sbin/extend_job.sh` | Privileged wrapper for scontrol |
+
+## Security
+
+- **Users cannot extend their own jobs directly** — `scontrol update TimeLimit` requires admin privileges in default Slurm configuration.
+- **Privileged wrapper** (`extend_job.sh`) runs via sudo, validates all inputs, and checks that `$SUDO_USER` matches the job owner before calling scontrol.
+- **Double ownership check** — both the Rails initializer and the bash script independently verify the user owns the job.
+- **Input sanitisation** — job_id must be numeric; extension minutes are bounded (15–120).
+- **Logging** — every extend attempt is logged to syslog via `logger`.
+
+## Deployment
+
+### 1. Deploy the privileged wrapper
 
 ```bash
-# inside a Slurm job (SLURM_JOB_ID is auto-detected)
+sudo cp extend_job.sh /usr/local/sbin/extend_job.sh
+sudo chown root:root /usr/local/sbin/extend_job.sh
+sudo chmod 755 /usr/local/sbin/extend_job.sh
+```
+
+### 2. Sudoers rule (recommended for production)
+
+If your cluster does not already grant `NOPASSWD: ALL`, add a targeted rule:
+
+```bash
+# /etc/sudoers.d/ood-extend-job
+ALL ALL=(root) NOPASSWD: /usr/local/sbin/extend_job.sh
+```
+
+### 3. Deploy the dashboard initializer
+
+```bash
+sudo cp dashboard_config/initializers/job_extend.rb \
+  /etc/ood/config/apps/dashboard/initializers/job_extend.rb
+```
+
+### 4. Deploy the session card widget
+
+```bash
+sudo cp jupyter_app/info.html.erb \
+  /var/www/ood/apps/sys/jupyter_app/info.html.erb
+```
+
+### 5. Restart OOD
+
+```bash
+sudo systemctl restart ondemand
+# or per-user: sudo /usr/sbin/nginx_stage nginx_clean -u <user>
+```
+
+## Configuration
+
+Edit constants at the top of `job_extend.rb`:
+
+```ruby
+EXTEND_SCRIPT = "/usr/local/sbin/extend_job.sh"
+EXTEND_MINUTES = 60
+```
+
+Edit bounds in `extend_job.sh`:
+
+```bash
+MIN_MINUTES=15
+MAX_MINUTES=120
+```
+
+## Standalone Flask app
+
+`app.py` + `templates/index.html` provide a standalone web server that can run
+behind JupyterHub or OOD proxy for monitoring and extending a single job.
+Useful for testing or as an alternative to the OOD integration.
+
+```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python app.py
+python app.py <JOB_ID>
 # → http://localhost:8090
 ```
 
-Or pass a specific job ID:
+## Slurm permissions note
 
-```bash
-python app.py 12345
-# → monitors job 12345
-```
-
-## Configuration (environment variables)
-
-| Variable | Default | Description |
-|---|---|---|
-| `SLURM_JOB_ID` | (auto) | Job to monitor |
-| `MONITOR_PORT` | `8090` | Port the server listens on |
-| `EXTEND_MINUTES` | `60` | Minutes added per extension click |
-| `EXTEND_SCRIPT` | _(none)_ | Path to a custom script called as `script <job_id> <minutes>`. Falls back to `scontrol update`. |
-
-## Running behind JupyterHub / Open OnDemand
-
-The server binds to `0.0.0.0:<MONITOR_PORT>`. Both JupyterHub (via
-`jupyter-server-proxy`) and Open OnDemand can reverse-proxy to that port on
-the compute node. The frontend uses only relative URLs, so no extra path
-configuration is needed.
-
-**JupyterHub example** (jupyter-server-proxy entry):
-
-```python
-# jupyter_server_config.py
-c.ServerProxy.servers = {
-    "slurm-monitor": {
-        "command": ["python", "/path/to/app.py"],
-        "port": 8090,
-        "timeout": 30,
-        "launcher_entry": {
-            "title": "Slurm Job Monitor",
-        },
-    },
-}
-```
-
-**Open OnDemand example** — add an interactive-app `form.yml` / `submit.yml`
-that starts `app.py` alongside the main application, then proxy to the port
-in your `view.html.erb`.
-
-## Custom extend script
-
-If your site restricts direct `scontrol update`, point `EXTEND_SCRIPT` to a
-wrapper that enforces local policy (max extensions, logging, etc.):
-
-```bash
-export EXTEND_SCRIPT=/path/to/extend_job.sh
-python app.py
-```
-
-The script receives two positional arguments: `<job_id> <minutes>`.
-
-## Screenshots
-
-Launch the server, open the URL, and pass `?job_id=XXXX` if `SLURM_JOB_ID`
-is not set:
-
-```
-http://localhost:8090/?job_id=1977
-```
+By default, Slurm does not allow users to modify `TimeLimit` on their own jobs.
+The `extend_job.sh` wrapper runs as root via sudo to bypass this. If your site
+uses a custom Slurm plugin or QOS that allows user-initiated extensions, you can
+modify the wrapper accordingly or call scontrol directly.
 
 ## License
 
