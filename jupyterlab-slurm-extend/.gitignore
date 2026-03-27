@@ -1,0 +1,11 @@
+node_modules/
+lib/
+jupyterlab_slurm_extend/labextension/
+jupyterlab_slurm_extend/_version.py
+*.egg-info/
+dist/
+build/
+.yarn/
+tsconfig.tsbuildinfo
+__pycache__/
+*.pyc

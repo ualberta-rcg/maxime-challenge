@@ -1,0 +1,67 @@
+/* Status bar item */
+.jp-SlurmExtend-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--jp-ui-font-size1);
+  line-height: var(--jp-content-line-height);
+  user-select: none;
+}
+
+.jp-SlurmExtend-icon {
+  font-size: 1.1em;
+}
+
+.jp-SlurmExtend-text {
+  white-space: nowrap;
+}
+
+/* Urgency color states */
+.jp-SlurmExtend-normal .jp-SlurmExtend-text {
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-SlurmExtend-warning {
+  background: rgba(255, 193, 7, 0.15);
+  border-radius: 3px;
+}
+.jp-SlurmExtend-warning .jp-SlurmExtend-text {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.jp-SlurmExtend-danger {
+  background: rgba(220, 53, 69, 0.15);
+  border-radius: 3px;
+  animation: slurm-pulse 1.5s ease-in-out infinite;
+}
+.jp-SlurmExtend-danger .jp-SlurmExtend-text {
+  color: #dc3545;
+  font-weight: 700;
+}
+
+@keyframes slurm-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Dialog body */
+.jp-SlurmExtend-dialog {
+  padding: 8px 0;
+  min-width: 300px;
+}
+
+.jp-SlurmExtend-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-SlurmExtend-row strong {
+  color: var(--jp-ui-font-color2);
+  font-weight: 500;
+  margin-right: 12px;
+}

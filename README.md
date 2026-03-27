@@ -1,11 +1,18 @@
-# Slurm Job Extend for Open OnDemand
+# Slurm Job Extend — OOD + JupyterLab
 
-Adds an **Extend Session** button to Open OnDemand interactive app session cards.
-When a Slurm job has less than 1 hour of wall-time remaining the button activates,
-letting the user add 60 minutes with a single click.
+Two implementations of the **Extend Session** button for Slurm jobs:
 
-Built for **Open OnDemand 4.1** on the **Eureka** cluster
-(Alliance Canada / PAICE / University of Alberta).
+1. **Open OnDemand integration** (`jupyter_app/`, `dashboard_config/`) —
+   adds an extend widget to OOD session cards. For clusters running OOD 4.1+.
+2. **JupyterLab extension** (`jupyterlab-slurm-extend/`) —
+   a native JupyterLab plugin with a status bar countdown timer and extend
+   dialog. For clusters where OOD is not available (e.g. Compute Quebec) and
+   JupyterLab runs behind JupyterHub.
+
+Both share the same `extend_job.sh` sudo wrapper for the actual `scontrol`
+call. See each subdirectory's README for deployment details.
+
+Built for **Alliance Canada** clusters (Eureka, Narval, etc.).
 
 ---
 
@@ -47,6 +54,18 @@ maxime-challenge/
 │       └── job_extend.rb                      # ** NEW — Rails routes for extend API **
 │
 ├── extend_job.sh                              # ** NEW — privileged sudo wrapper **
+│
+│   ── JupyterLab Extension (for non-OOD clusters) ───────
+│
+├── jupyterlab-slurm-extend/                   # ** NEW — JupyterLab plugin **
+│   ├── src/index.ts                           #   Frontend: status bar + extend dialog
+│   ├── style/base.css                         #   Widget styling
+│   ├── jupyterlab_slurm_extend/
+│   │   ├── __init__.py                        #   Extension entry points
+│   │   └── handlers.py                        #   Server API (squeue/scontrol)
+│   ├── package.json                           #   npm / JupyterLab metadata
+│   ├── pyproject.toml                         #   Python build config
+│   └── README.md                              #   Install & deploy instructions
 │
 │   ── Standalone Flask App (bonus / testing) ──────────────
 │
